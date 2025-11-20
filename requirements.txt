@@ -1,0 +1,8 @@
+pandas
+requests
+duckdb
+pyarrow
+python-dotenv
+scikit-learn
+great_expectations
+apache-airflow   # Airflow itself (Astro will manage versions)
