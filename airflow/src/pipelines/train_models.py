@@ -33,7 +33,7 @@ def load_gold() -> pd.DataFrame:
             avg_total_amount,
             revenue,
             borough_complaints_total,
-            complaints_total,
+            borough_trips_total,
             complaints_per_100_trips,
             lag1_trips,
             lag1_borough_complaints_total
@@ -183,15 +183,17 @@ def train_and_save_models() -> None:
         "lag1_borough_complaints_total",
     ]
 
-    df_complaints = df.dropna(subset=feature_cols_complaints + ["complaints_total"]).copy()
+    # Target is *borough-level* complaints at that hour (broadcast to each zone)
+    df_complaints = df.dropna(
+        subset=feature_cols_complaints + ["borough_complaints_total"]
+    ).copy()
     df_complaints = df_complaints.sort_values("hour")
 
     Xc = df_complaints[feature_cols_complaints]
-    y_complaints = df_complaints["complaints_total"]
+    y_complaints = df_complaints["borough_complaints_total"]
 
     split_idx2 = int(len(df_complaints) * 0.8)
     Xc_train, Xc_test = Xc.iloc[:split_idx2], Xc.iloc[split_idx2:]
-    # FIXED: test labels must align with Xc_test
     y2_train, y2_test = y_complaints.iloc[:split_idx2], y_complaints.iloc[split_idx2:]
 
     logger.info(
@@ -270,16 +272,14 @@ def train_and_save_models() -> None:
 
     df_scores.drop(columns=["_cp_for_rank"], inplace=True)
 
-    # Risk-adjusted revenue: penalize high complaints
-    alpha = 5.0  # penalty weight per complaint
+    # Risk-adjusted revenue: scale revenue by safety_score (0–1)
     df_scores["risk_adjusted_revenue"] = (
-        df_scores["revenue"]
-        - alpha * df_scores["borough_complaints_total"].fillna(0.0)
+        df_scores["revenue"].clip(lower=0.0) * df_scores["safety_score"]
     )
 
     # Zone cluster: combine demand & risk
     # High demand = demand_score >= 0.66
-    # High risk = complaints_per_100_trips in top ~1/3 (using the capped series)
+    # High risk   = complaints_per_100_trips in top ~1/3 (using the capped series)
     risk_threshold = cp_capped.quantile(0.66)
     high_demand = df_scores["demand_score"] >= 0.66
     high_risk = cp_capped.fillna(global_cp_median) >= risk_threshold
